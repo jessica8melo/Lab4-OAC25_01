@@ -12,15 +12,15 @@ entity TopDE is
         PC       : out std_logic_vector(31 downto 0);
         Instr    : out std_logic_vector(31 downto 0);
         Regout   : out std_logic_vector(31 downto 0);
-        Estado   : out std_logic_vector(3 downto 0)
+        Estado   : out std_logic_vector(3 downto 0) -- Isso não é usado no pipeline
     );
 end TopDE;
 
 architecture Behavioral of TopDE is
     signal ClockDIV_internal : std_logic := '1';
-   
-    -- Component declaration for Uniciclo
-    component Uniciclo
+    
+    -- Declaração do componente
+    component Pipeline
         port (
             clockCPU : in  std_logic;
             clockMem : in  std_logic;
@@ -31,20 +31,20 @@ architecture Behavioral of TopDE is
             regout   : out std_logic_vector(31 downto 0)
         );
     end component;
-   
+    
 begin
-    -- Clock divider process
+    -- Divisor de clock (ClockCPU = ClockMem/2)
     process(CLOCK)
     begin
         if rising_edge(CLOCK) then
             ClockDIV_internal <= not ClockDIV_internal;
         end if;
     end process;
-   
+    
     ClockDIV <= ClockDIV_internal;
-   
-    -- Instantiation of Uniciclo
-    UNI1 : Uniciclo
+    
+    -- Instanciação do processador
+    PIPE1 : Pipeline
         port map (
             clockCPU => ClockDIV_internal,
             clockMem => CLOCK,
@@ -54,8 +54,8 @@ begin
             regin    => Regin,
             regout   => Regout
         );
-   
-    -- The commented Multiciclo and Pipeline instantiations would go here
-    -- but are left out as they were commented in the original Verilog
-   
+        
+    -- Esse sinal não é usado no pipeline, então ele tá "desconectado"
+    Estado <= "0000"; 
+    
 end Behavioral;
