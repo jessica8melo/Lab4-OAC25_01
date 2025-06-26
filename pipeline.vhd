@@ -66,7 +66,7 @@ architecture Behavioral of Pipeline is
 
     component ALU is
         port (
-            iControl : in  std_logic_vector(4 downto 0);
+            iControl : in  std_logic_vector(4 downto 0):="00000";
             iA       : in  std_logic_vector(31 downto 0);
             iB       : in  std_logic_vector(31 downto 0);
             oResult  : out std_logic_vector(31 downto 0)
@@ -79,7 +79,7 @@ architecture Behavioral of Pipeline is
             imm32 : out std_logic_vector(31 downto 0)
         );
     end component;
-    
+   
     -- Sinal de seleção do PC
     signal PCSrc         : std_logic;
 
@@ -92,12 +92,12 @@ architecture Behavioral of Pipeline is
     -- Registrador de IF/ID (Ins Decode)
     signal IF_ID_Instr     : std_logic_vector(31 downto 0);
     signal IF_ID_PC_plus_4 : std_logic_vector(31 downto 0);
-    
+   
     -- Estágio ID
     signal ID_ReadData1    : std_logic_vector(31 downto 0);
     signal ID_ReadData2    : std_logic_vector(31 downto 0);
     signal ID_Imm          : std_logic_vector(31 downto 0);
-    
+   
     -- Registrador de Pipeline ID/EX (Ins Execute)
     signal ID_EX_RegWrite    : std_logic;
     signal ID_EX_MemRead     : std_logic;
@@ -120,7 +120,7 @@ architecture Behavioral of Pipeline is
     signal EX_ALUResult      : std_logic_vector(31 downto 0);
     signal EX_ZeroFlag       : std_logic;
     signal Branch_Target_Addr: std_logic_vector(31 downto 0);
-    
+   
     -- Registrador de Pipeline EX/MEM (Memory Access)
     signal EX_MEM_RegWrite     : std_logic;
     signal EX_MEM_MemRead      : std_logic;
@@ -147,15 +147,25 @@ architecture Behavioral of Pipeline is
     signal MEM_WB_ALUResult   : std_logic_vector(31 downto 0);
     signal MEM_WB_rd          : std_logic_vector(4 downto 0);
     signal MEM_WB_PC_plus_4   : std_logic_vector(31 downto 0);
-    
+   
     -- Estágio WB
     signal WB_WriteData : std_logic_vector(31 downto 0);
+
+ -- Sinais Intermediários
+    signal CU_ALUOpType   : std_logic_vector(1 downto 0);
+    signal CU_RegWrite    : std_logic;
+    signal CU_MemRead     : std_logic;
+    signal CU_MemWrite    : std_logic;
+    signal CU_ALUSrc      : std_logic;
+    signal CU_WBDataSel   : std_logic_vector(1 downto 0);
+    signal CU_BranchPCSel : std_logic;
+    signal CU_Jump        : std_logic;
 
 begin
     -- Atribuição de saídas para depuração
     PC    <= PC_reg;
     Instr <= IF_ID_Instr;
-    
+   
     -- ESTÁGIO IF (INSTRUCTION FETCH)
     PC_plus_4_IF <= std_logic_vector(unsigned(PC_reg) + 4);
 
@@ -164,7 +174,7 @@ begin
                  else Branch_Target_Addr; -- JAL, BEQ
 
     PCSrc <= (EX_MEM_BranchPCSel and EX_MEM_ZeroFlag) or (EX_MEM_Jump);
-    
+   
     PC_next <= PC_Target when PCSrc = '1' else
                PC_plus_4_IF;
 
@@ -177,7 +187,7 @@ begin
             PC_reg <= PC_next;
         end if;
     end process;
-    
+   
     -- Busca a Instrução
     MemI_inst : ramI
         port map (
@@ -187,7 +197,7 @@ begin
             wren    => '0',
             q       => Instr_IF
         );
-        
+       
     -- REGISTRADOR DE IF/ID
     process(clockCPU, reset)
     begin
@@ -201,7 +211,7 @@ begin
             IF_ID_PC_plus_4 <= PC_plus_4_IF;
         end if;
     end process;
-    
+   
     -- ESTÁGIO ID (INSTRUCTION DECODE)
     -- Unidade de Controle Principal (sinais gerados a partir da instrução em ID)
     CU_inst : ControlUnit
@@ -217,7 +227,22 @@ begin
             BranchPCSel => open,
             Jump        => open
         );
-        
+ 
+    -- Usado para passar os sinais de controle para o próximo estágio
+    CU_inst_ID_EX : ControlUnit
+        port map (
+            opcode      => IF_ID_Instr(6 downto 0),
+            zero_flag   => '0',
+            ALUOpType   => CU_ALUOpType,
+            RegWrite    => CU_RegWrite,
+            MemRead     => CU_MemRead,
+            MemWrite    => CU_MemWrite,
+            ALUSrc      => CU_ALUSrc,
+            WBDataSel   => CU_WBDataSel,
+            BranchPCSel => CU_BranchPCSel,
+            Jump        => CU_Jump
+        );
+       
     -- Banco de Regs (leitura em ID, escrita em WB)
     Regs_inst : xregs
         port map (
@@ -240,7 +265,7 @@ begin
             instr => IF_ID_Instr,
             imm32 => ID_Imm
         );
-    
+   
     -- REGISTRADOR DE ID/EX
     process(clockCPU, reset)
     begin
@@ -255,20 +280,15 @@ begin
             ID_EX_BranchPCSel <= '0';
         elsif rising_edge(clockCPU) then
             -- Passa os sinais de controle para o próximo estágio
-            CU_inst_ID_EX : ControlUnit
-                port map (
-                    opcode      => IF_ID_Instr(6 downto 0),
-                    zero_flag   => '0',
-                    ALUOpType   => ID_EX_ALUOpType,
-                    RegWrite    => ID_EX_RegWrite,
-                    MemRead     => ID_EX_MemRead,
-                    MemWrite    => ID_EX_MemWrite,
-                    ALUSrc      => ID_EX_ALUSrc,
-                    WBDataSel   => ID_EX_WBDataSel,
-                    BranchPCSel => ID_EX_BranchPCSel,
-                    Jump        => ID_EX_Jump
-                );
-            
+            ID_EX_RegWrite <= CU_RegWrite;
+            ID_EX_MemRead <= CU_MemRead;
+            ID_EX_MemWrite <= CU_MemWrite;
+            ID_EX_ALUSrc <= CU_ALUSrc;
+            ID_EX_WBDataSel <= CU_WBDataSel;
+            ID_EX_ALUOpType <= CU_ALUOpType;
+            ID_EX_Jump <= CU_Jump;
+            ID_EX_BranchPCSel <= CU_BranchPCSel;
+           
             -- Passa os dados
             ID_EX_ReadData1   <= ID_ReadData1;
             ID_EX_ReadData2   <= ID_ReadData2;
@@ -301,7 +321,7 @@ begin
             iB       => EX_ALU_B_Mux_Out,
             oResult  => EX_ALUResult
         );
-        
+       
     -- Flag Zero para branches
     EX_ZeroFlag <= '1' when (signed(ID_EX_ReadData1) - signed(ID_EX_ReadData2)) = 0 else '0';
 
@@ -327,7 +347,7 @@ begin
             EX_MEM_WBDataSel   <= ID_EX_WBDataSel;
             EX_MEM_Jump        <= ID_EX_Jump;
             EX_MEM_BranchPCSel <= ID_EX_BranchPCSel;
-            
+           
             -- Passa dados
             EX_MEM_ALUResult   <= EX_ALUResult;
             EX_MEM_WriteData   <= ID_EX_ReadData2; -- Dado para SW
@@ -347,7 +367,7 @@ begin
             wren    => EX_MEM_MemWrite,
             q       => MEM_ReadDataMem
         );
-        
+       
     -- REGISTRADOR DE MEM/WB
     process(clockCPU, reset)
     begin
@@ -359,7 +379,7 @@ begin
             -- Passa sinais de controle
             MEM_WB_RegWrite  <= EX_MEM_RegWrite;
             MEM_WB_WBDataSel <= EX_MEM_WBDataSel;
-            
+           
             -- Passa dados
             MEM_WB_ReadDataMem <= MEM_ReadDataMem;
             MEM_WB_ALUResult   <= EX_MEM_ALUResult;
@@ -367,7 +387,7 @@ begin
             MEM_WB_PC_plus_4   <= EX_MEM_PC_plus_4;
         end if;
     end process;
-    
+   
     -- ESTÁGIO WB (WRITE BACK)
     -- MUX para selecionar o dado a ser escrito no banco de registradores
     with MEM_WB_WBDataSel select
